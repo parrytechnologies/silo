@@ -12,7 +12,7 @@ from pathlib import Path
 from silo.config import Settings
 from silo.embed import Embedder
 from silo.parse import Parser, supported_suffixes
-from silo.store import Store
+from silo.store import Store, file_sha256
 
 SKIP_DIRS = {".git", ".svn", "node_modules", "__pycache__", ".venv", ".silo"}
 
@@ -44,14 +44,6 @@ class IndexReport:
 
 def _doc_id(path: Path) -> str:
     return hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:16]
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def discover(root: Path, settings: Settings) -> Iterator[Path]:
@@ -129,14 +121,14 @@ class Indexer:
         if done and not force and existing["size"] == stat.st_size:
             if existing["mtime"] == stat.st_mtime:
                 return IndexEvent("unchanged", str(path))
-            if existing["sha256"] == _sha256(path):  # touched, not edited
+            if existing["sha256"] == file_sha256(path):  # touched, not edited
                 self.store.touch_document(doc_id, stat.st_mtime)
                 return IndexEvent("unchanged", str(path))
 
         record = dict(
             doc_id=doc_id, path=str(path), root=str(base),
             rel_path=str(path.relative_to(base)), suffix=path.suffix.lower(),
-            size=stat.st_size, mtime=stat.st_mtime, sha256=_sha256(path),
+            size=stat.st_size, mtime=stat.st_mtime, sha256=file_sha256(path),
             indexed_at=time.time(),
         )
         started = time.perf_counter()

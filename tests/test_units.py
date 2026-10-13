@@ -10,7 +10,14 @@ from silo import models
 from silo.config import load_settings
 from silo.indexer import discover
 from silo.llm import build_messages, egress
-from silo.search import Hit, Searcher, SearchResult, reading_order
+from silo.search import (
+    Hit,
+    Searcher,
+    SearchResult,
+    group_sources,
+    reading_order,
+    source_state,
+)
 from silo.store import Store
 
 
@@ -85,8 +92,14 @@ class _FakeStore:
     def keyword_search(self, query, limit):
         return self.kw[:limit]
 
+    docs = {"d": {"title": "Doc", "rel_path": "doc.pdf", "suffix": ".pdf", "path": "/x",
+                  "sha256": "same", "mtime": 1.0, "size": 1}}
+
     def documents_by_ids(self, ids):
-        return {"d": {"title": "Doc", "rel_path": "doc.pdf", "suffix": ".pdf", "path": "/x"}}
+        return {i: self.docs[i] for i in ids if i in self.docs}
+
+    def documents_by_sha(self, shas):
+        return {sha: [d for d in self.docs.values() if d["sha256"] == sha] for sha in shas}
 
 
 def test_reciprocal_rank_fusion(settings):
@@ -101,6 +114,55 @@ def test_reciprocal_rank_fusion(settings):
     assert [h.chunk_id for h in searcher.search("x", mode="keyword", rerank=False).hits] == \
         ["d:3", "d:4"]
     assert searcher.search("   ", rerank=False).hits == []
+
+
+def test_identical_files_are_returned_once(settings):
+    store = _FakeStore()
+    store.docs = {**store.docs, "e": {**store.docs["d"], "rel_path": "copy.pdf", "path": "/y"}}
+    twin = {**store.vec[0], "id": "e:1", "doc_id": "e", "_distance": 0.15}
+    store.vec = [store.vec[0], twin, *store.vec[1:]]
+    hits = Searcher(settings, store, _FakeEmbedder()).search(
+        "anything", k=10, mode="semantic", rerank=False).hits
+    assert [h.chunk_id for h in hits] == ["d:1", "d:2", "d:3"]  # e:1 repeats d:1
+    assert hits[0].also_at == ["/y"] and hits[0].path == "/x"
+    assert hits[0].source_state == "missing" and hits[0].file_available is False
+
+
+def test_sources_group_passages_by_file():
+    def hit(rank, doc, index, score, headings, page):
+        return Hit(rank, f"{doc}:{index}", doc, doc.upper(), f"{doc}.pdf", ".pdf",
+                   f"text  of {doc} {index}", headings, page, page, score, path=f"/r/{doc}.pdf")
+
+    result = SearchResult("q", "hybrid", True, [
+        hit(1, "a", 9, 0.9, "Late", 4), hit(2, "b", 0, 0.8, "Only", 1),
+        hit(3, "a", 2, 0.7, "Early", 1), hit(4, "a", 3, 0.6, "Early", 1),
+        hit(5, "c", 0, 0.5, "", 0),
+    ], {})
+    grouped = group_sources(result, k=2)
+    assert [(s.rank, s.doc_id, s.matches, s.score) for s in grouped.sources] == \
+        [(1, "a", 3, 0.9), (2, "b", 1, 0.8)]
+    first = grouped.sources[0]
+    # One entry per section, in reading order, pointing at that section's best passage.
+    assert [(s.headings, s.passage_id) for s in first.sections] == \
+        [("Early", "a:2"), ("Late", "a:9")]
+    assert first.path == "/r/a.pdf" and first.snippet == "text of a 9"
+    assert grouped.to_dict()["sources"][1]["sections"][0]["page_start"] == 1
+
+
+def test_source_state_tracks_the_file_on_disk(tmp_path):
+    note = tmp_path / "note.md"
+    note.write_text("first")
+    stat = note.stat()
+    from silo.store import file_sha256
+    doc = {"path": str(note), "mtime": stat.st_mtime, "size": stat.st_size,
+           "sha256": file_sha256(note)}
+    assert source_state(doc) == "current"
+    os.utime(note, (stat.st_atime, stat.st_mtime + 60))  # touched, same content
+    assert source_state(doc) == "current"
+    note.write_text("second, and longer")
+    assert source_state(doc) == "modified"
+    note.unlink()
+    assert source_state(doc) == "missing"
 
 
 def test_catalogue_roundtrip_and_model_guard(settings):

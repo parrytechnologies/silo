@@ -55,11 +55,18 @@ Search from the terminal too:
 
 ```console
 $ uv run silo search "PR.AA-05" -k 1
- 1 nist-cybersecurity-framework-2.0.pdf · p.25  vec#2 bm25#1 rerank 1.00
-   PROTECT (PR): Safeguards to manage the organization's cybersecurity risks are used
+ 1 nist-cybersecurity-framework-2.0.pdf  1.00 · 4 matches
+   /path/to/silo/sample-corpus/nist-cybersecurity-framework-2.0.pdf
+   § Appendix A. CSF Core · p.20
+   § PROTECT (PR): Safeguards to manage the organization's cybersecurity risks are used · p.24
+   § PROTECT (PR): Safeguards to manage the organization's cybersecurity risks are used · p.25
    - o PR.AA-05: Access permissions, entitlements, and authorizations are defined in a
    policy, managed, enforced, and reviewed, and incorporate the principles of least …
 ```
+
+Results are files, not passages: each one lists where in the file the query matched, says
+if the file has changed since it was indexed, and names any other paths that hold an identical
+copy. Add `--passages` for the individual matching passages.
 
 ## How it works
 
@@ -153,8 +160,10 @@ indexed text instead of opening the file. Details and caveats:
 ## Use it from Claude (MCP)
 
 `silo mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio.
-The client gets five read-only tools: `search_documents`, `get_passage_context`,
-`read_document`, `list_documents` and `index_status`.
+The client gets six read-only tools: `find_sources`, `search_documents`, `get_passage_context`,
+`read_document`, `list_documents` and `index_status`. `find_sources` returns the relevant
+files with their absolute paths and matching sections, so a client that can read files opens
+the current file instead of relying on the indexed text.
 
 ```bash
 # Claude Code
@@ -195,7 +204,7 @@ of retrieved passages are sent to the model. See [docs/llm.md](docs/llm.md).
 |---|---|
 | `silo models pull` / `models status` | Download or list local models |
 | `silo index <folder> [--ocr] [--force] [--quiet]` | Index new and changed files; drop deleted ones |
-| `silo search "<query>" [-k N] [--mode hybrid\|semantic\|keyword] [--json]` | Search from the terminal |
+| `silo search "<query>" [-k N] [--mode hybrid\|semantic\|keyword] [--passages] [--json]` | Search from the terminal: relevant files, or passages with `--passages` |
 | `silo ask "<question>"` | Cited answer from the configured LLM |
 | `silo serve [--host] [--port]` | Web interface and JSON API |
 | `silo mcp` | MCP server on stdio for Claude and other MCP clients |

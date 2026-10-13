@@ -6,4 +6,4 @@ from silo._offline import enforce_offline
 # read their offline switches once, at import time.
 enforce_offline()
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

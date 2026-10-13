@@ -6,6 +6,7 @@ full-text index side by side, so there is no database server to run or secure.
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import threading
 import time
@@ -45,6 +46,14 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 class IndexMismatch(RuntimeError):
@@ -184,6 +193,20 @@ class Store:
                 f"SELECT * FROM documents WHERE doc_id IN ({marks})", ids
             ).fetchall()
         return {r["doc_id"]: r for r in rows}
+
+    def documents_by_sha(self, shas: list[str]) -> dict[str, list[sqlite3.Row]]:
+        """Every catalogued file with one of these content hashes, grouped by hash."""
+        if not shas:
+            return {}
+        marks = ",".join("?" for _ in shas)
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT * FROM documents WHERE sha256 IN ({marks}) ORDER BY path", shas
+            ).fetchall()
+        grouped: dict[str, list[sqlite3.Row]] = {}
+        for row in rows:
+            grouped.setdefault(row["sha256"], []).append(row)
+        return grouped
 
     def roots(self) -> list[str]:
         with self._lock:

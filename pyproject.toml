@@ -1,6 +1,6 @@
 [project]
 name = "silo-search"
-version = "0.2.0"
+version = "0.3.0"
 description = "SILO — Search and Indexing, Local-Only. CPU-only, air-gapped document search: Docling parsing, hybrid BM25 + vector retrieval, optional LLM answers."
 readme = "README.md"
 license = "Apache-2.0"

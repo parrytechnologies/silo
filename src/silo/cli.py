@@ -263,22 +263,47 @@ def search(
     k: Annotated[int, typer.Option("-k", help="Number of results.")] = 5,
     mode: Annotated[str, typer.Option(help="hybrid | semantic | keyword")] = "hybrid",
     rerank: Annotated[bool | None, typer.Option("--rerank/--no-rerank")] = None,
+    passages: Annotated[bool, typer.Option(
+        "--passages", help="List matching passages instead of the files they are in.")] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Machine-readable output.")] = False,
     home: HomeOpt = None, index: IndexOpt = None,
 ) -> None:
-    """Search the index from the terminal."""
+    """Search the index from the terminal: the relevant files and where they match."""
     engine = _open(_settings(home, index), read_only=True)
-    result = engine.searcher.search(query, k=k, mode=mode, rerank=rerank)
+    if passages:
+        result = engine.searcher.search(query, k=k, mode=mode, rerank=rerank)
+        found = result.hits
+    else:
+        result = engine.searcher.sources(query, k=k, mode=mode, rerank=rerank)
+        found = result.sources
     if as_json:
         print(json.dumps(result.to_dict(), indent=2))
         return
-    if not result.hits:
+    if not found:
         console.print("[yellow]No results.[/yellow]")
         return
-    for hit in result.hits:
-        _print_hit(hit)
+    for item in found:
+        _print_hit(item) if passages else _print_source(item)
     timing = " · ".join(f"{name} {ms:.0f}ms" for name, ms in result.timings_ms.items())
     console.print(f"[dim]{timing}[/dim]", highlight=False)
+
+
+def _print_source(source) -> None:
+    state = {"modified": "  [yellow]changed since indexing[/yellow]",
+             "missing": "  [red]file not found[/red]"}.get(source.source_state, "")
+    matches = f"{source.matches} match{'es' if source.matches != 1 else ''}"
+    console.print(f"[bold cyan]{source.rank:>2}[/bold cyan] [bold]{source.rel_path}[/bold]  "
+                  f"[dim]{source.score:.2f} · {matches}[/dim]{state}", highlight=False)
+    console.print(f"   {source.path}", highlight=False, markup=False, style="dim", soft_wrap=True)
+    for other in source.also_at:
+        console.print(f"   same file: {other}", highlight=False, markup=False, style="dim",
+                      soft_wrap=True)
+    for section in source.sections:
+        page = f"p.{section.page_start}" if section.page_start else ""
+        label = " · ".join(part for part in (section.headings, page) if part)
+        if label:
+            console.print(f"   § {label}", highlight=False, markup=False, style="blue")
+    console.print(f"   {source.snippet}\n", highlight=False, markup=False)
 
 
 def _print_hit(hit) -> None:

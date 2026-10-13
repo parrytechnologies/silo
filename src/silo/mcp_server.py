@@ -26,12 +26,18 @@ from silo.config import Settings
 from silo.search import MODES
 
 INSTRUCTIONS = (
-    "SILO is a local search index over the user's own documents. Use search_documents "
-    "to find passages relevant to a question; prefer several focused searches over one "
-    "broad one, and try mode='keyword' for exact identifiers. Each result has a "
-    "passage_id: call get_passage_context to read around a result before relying on it, "
-    "or read_document to read a document in order. Always cite the file and page of the "
-    "passages you use, and say so when the documents do not cover the question."
+    "SILO is a local search index over the user's own documents. Start with find_sources: "
+    "it returns the files relevant to a question, each with its absolute path and the "
+    "sections and pages that matched. If you can read files, open those files at the "
+    "listed sections and answer from them: the file on disk is authoritative, and the "
+    "index holds the text as it was when last indexed. A source whose state is 'modified' "
+    "has changed since then; one that is 'missing' is not at that path on this machine. "
+    "When you cannot read files, or the source is a long PDF or office document, use "
+    "search_documents for the matching passages, get_passage_context to read around one, "
+    "or read_document to read a document in order; these return the indexed text. Prefer "
+    "several focused searches over one broad one, and try mode='keyword' for exact "
+    "identifiers. Always cite the file and page you used, and say so when the documents "
+    "do not cover the question."
 )
 MODE_HELP = (
     "'hybrid' (default: keyword + semantic, reranked), 'semantic' (meaning only) "
@@ -52,6 +58,7 @@ def _passage(row: dict, doc: Any | None) -> dict:
         "document_id": row["doc_id"],
         "position": row["chunk_index"],
         "file": doc["rel_path"] if doc else "",
+        "path": doc["path"] if doc else "",
         "section": row["headings"],
         "text": _clip(row["text"]),
     }
@@ -80,6 +87,38 @@ def build_server(settings: Settings) -> FastMCP:
             return state["engine"]
 
     @server.tool(annotations=READ_ONLY)
+    def find_sources(
+        query: Annotated[str, Field(description="A question in plain language, or exact terms.")],
+        limit: Annotated[int, Field(ge=1, le=25, description="How many files.")] = 8,
+        mode: Annotated[str, Field(description=MODE_HELP)] = "hybrid",
+    ) -> dict:
+        """Find the files relevant to a question. Each source is one file, with its
+        absolute path, the sections and pages that matched, and whether the file has
+        changed since it was indexed. Use this to decide which files to open."""
+        if mode not in MODES:
+            raise ToolError(f"mode must be one of: {', '.join(MODES)}")
+        result = engine().searcher.sources(query, k=limit, mode=mode)
+        return {
+            "query": result.query,
+            "mode": result.mode,
+            "sources": [
+                {
+                    "path": s.path, "file": s.rel_path, "title": s.title,
+                    "document_id": s.doc_id, "score": round(s.score, 4), "matches": s.matches,
+                    "state": s.source_state,
+                    **({"also_at": s.also_at} if s.also_at else {}),
+                    "sections": [
+                        {"section": sec.headings, "passage_id": sec.passage_id,
+                         **({"page": sec.page_start} if sec.page_start else {})}
+                        for sec in s.sections
+                    ],
+                    "snippet": s.snippet,
+                }
+                for s in result.sources
+            ],
+        }
+
+    @server.tool(annotations=READ_ONLY)
     def search_documents(
         query: Annotated[str, Field(description="A question in plain language, or exact terms.")],
         limit: Annotated[int, Field(ge=1, le=25, description="How many passages.")] = 8,
@@ -96,6 +135,8 @@ def build_server(settings: Settings) -> FastMCP:
             "results": [
                 {
                     "passage_id": h.chunk_id, "document_id": h.doc_id, "file": h.rel_path,
+                    "path": h.path, "state": h.source_state,
+                    **({"also_at": h.also_at} if h.also_at else {}),
                     "title": h.title, **({"page": h.page_start} if h.page_start else {}),
                     "section": h.headings, "score": round(h.score, 4), "text": _clip(h.text),
                 }
@@ -119,7 +160,7 @@ def build_server(settings: Settings) -> FastMCP:
         if doc is None:
             raise ToolError(f"no document with id {doc_id!r} in this index")
         rows = store.passages(doc_id, max(0, int(index) - before), int(index) + after)
-        return {"file": doc["rel_path"], "title": doc["title"],
+        return {"file": doc["rel_path"], "path": doc["path"], "title": doc["title"],
                 "passages": [_passage(r, doc) for r in rows]}
 
     @server.tool(annotations=READ_ONLY)
@@ -136,7 +177,8 @@ def build_server(settings: Settings) -> FastMCP:
             raise ToolError(f"no document with id {document_id!r} in this index")
         rows = store.passages(document_id, start, start + count - 1)
         out: dict[str, Any] = {
-            "file": doc["rel_path"], "title": doc["title"], "pages": doc["pages"],
+            "file": doc["rel_path"], "path": doc["path"], "title": doc["title"],
+            "pages": doc["pages"],
             "total_passages": doc["chunks"], "passages": [_passage(r, doc) for r in rows],
         }
         if start + count < doc["chunks"]:
@@ -158,7 +200,8 @@ def build_server(settings: Settings) -> FastMCP:
         return {
             "total": len(docs),
             "documents": [
-                {"document_id": d["doc_id"], "file": d["rel_path"], "title": d["title"],
+                {"document_id": d["doc_id"], "file": d["rel_path"], "path": d["path"],
+                 "title": d["title"],
                  "pages": d["pages"], "passages": d["chunks"], "status": d["status"]}
                 for d in docs[:limit]
             ],

@@ -172,6 +172,8 @@ def test_mcp_server_over_stdio(engine):
 
             _, text = await call("search_documents", query="carry forward unused days", limit=2)
             found = json.loads(text)["results"]
+            _, text = await call("find_sources", query="carry forward unused days", limit=2)
+            sources = json.loads(text)["sources"]
             _, text = await call("get_passage_context", passage_id=found[0]["passage_id"])
             context = json.loads(text)
             _, text = await call("read_document", document_id=found[0]["document_id"], count=1)
@@ -179,13 +181,42 @@ def test_mcp_server_over_stdio(engine):
             _, text = await call("index_status")
             status = json.loads(text)
             failed, message = await call("get_passage_context", passage_id="nonsense")
-            return names, found, context, reading, status, failed, message
+            return names, found, sources, context, reading, status, failed, message
 
-    names, found, context, reading, status, failed, message = asyncio.run(session())
-    assert names == {"search_documents", "get_passage_context", "read_document",
+    names, found, sources, context, reading, status, failed, message = asyncio.run(session())
+    assert names == {"find_sources", "search_documents", "get_passage_context", "read_document",
                      "list_documents", "index_status"}
     assert found[0]["file"] == "leave-policy.pdf" and found[0]["page"] == 2
+    top = sources[0]
+    assert top["file"] == "leave-policy.pdf" and top["state"] == "current"
+    assert os.path.isabs(top["path"]) and os.path.isfile(top["path"])
+    assert top["path"] == found[0]["path"] == reading["path"]
+    assert any(s.get("page") == 2 for s in top["sections"]) and "text" not in top
+    assert len({s["file"] for s in sources}) == len(sources)  # one entry per file
     assert any("five unused days" in p["text"] for p in context["passages"])
     assert reading["total_passages"] >= 1 and reading["passages"][0]["position"] == 0
     assert status["passages"] > 0 and status["store_id"]
     assert failed and "passage_id should look like" in message
+
+
+def test_sources_collapse_copies_and_flag_changed_files(engine):
+    _, _, indexer, searcher, work, _ = engine
+    (work / "archive").mkdir()
+    shutil.copy(work / "leave-policy.pdf", work / "archive" / "leave-policy-copy.pdf")
+    indexer.index(work)
+
+    sources = searcher.sources("carry forward unused days", k=5).sources
+    policies = [s for s in sources if "leave-policy" in s.rel_path]
+    assert len(policies) == 1 and sources[0] is policies[0]
+    top = policies[0]
+    copy = work / "archive" / "leave-policy-copy.pdf"
+    assert {top.path, *top.also_at} == {str(work / "leave-policy.pdf"), str(copy)}
+    assert top.source_state == "current" and any(s.page_start == 2 for s in top.sections)
+    hits = searcher.search("carry forward unused days", k=10).hits
+    positions = [h.chunk_id.rsplit(":", 1)[1] for h in hits if "leave-policy" in h.rel_path]
+    assert positions and len(set(positions)) == len(positions)  # each passage once, not twice
+
+    note = work / "notes" / "expenses.md"
+    note.write_text(note.read_text() + "\nEdited after indexing.\n")
+    edited = searcher.sources("overnight meal allowance", k=1).sources[0]
+    assert edited.rel_path.endswith("expenses.md") and edited.source_state == "modified"

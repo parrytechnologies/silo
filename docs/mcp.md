@@ -1,8 +1,8 @@
 # Using SILO from Claude and other MCP clients
 
 `silo mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server. It lets an
-assistant use your local index as a set of tools: it decides what to search for, reads around
-the results, and answers with citations.
+assistant use your local index as a set of tools: it decides what to search for, finds the
+files and sections that match, reads them, and answers with citations.
 
 ## What crosses the boundary
 
@@ -51,17 +51,40 @@ configured the same way: command `silo`, argument `mcp`.
 
 ## Tools
 
-All five are marked read-only.
+All six are marked read-only.
 
 | Tool | Arguments | Returns |
 |---|---|---|
+| `find_sources` | `query`, `limit` (1–25 files, default 8), `mode` | Ranked files, one entry each: absolute `path`, `state`, `also_at`, matched `sections` (heading, page, `passage_id`), `matches`, score and a short snippet |
 | `search_documents` | `query`, `limit` (1–25, default 8), `mode` (`hybrid`, `semantic`, `keyword`) | Ranked passages with `passage_id`, `document_id`, file, page, section, score, text |
 | `get_passage_context` | `passage_id`, `before` (default 2), `after` (default 2) | The passage and its neighbours in reading order |
 | `read_document` | `document_id`, `start`, `count` (max 20) | Passages in order, with `next_start` for paging |
 | `list_documents` | `contains`, `limit` | Document ids, files, titles, page and passage counts |
 | `index_status` | — | Store location and id, counts, embedding model, source folders |
 
-Passages are capped at 4,000 characters each.
+Passages are capped at 4,000 characters each. Every tool that names a document also returns
+its absolute `path`.
+
+## Sources first, passages second
+
+The index stores the text of each passage as it was when the file was last indexed. It is a
+copy, and it goes out of date when a file is edited and not re-indexed. `find_sources` is
+built for clients that can read files themselves (Claude Code, for one): it says which files
+are relevant and where in them to look, and the client reads the file on disk.
+
+- `state` is `current` when the file matches what was indexed, `modified` when it has changed
+  since, and `missing` when it is not at that path on this machine (an index used away from
+  its documents). A `modified` file can still be read; its listed sections may have moved.
+- `also_at` lists other paths holding a byte-identical copy of the file. Identical copies are
+  returned once, by `find_sources` and by `search_documents`.
+- A file ranks by its best matching passage. `matches` counts how many retrieved passages came
+  from it and only breaks ties.
+- Sections are headings and page numbers, not line numbers.
+
+Use `search_documents`, `get_passage_context` and `read_document` when the client cannot read
+files, or when the source is a long PDF or office document and the matching passages are
+enough. A file that was created or edited after the last `silo index` run is found only by
+its old text, or not at all, so re-index on a schedule.
 
 ## What to ask
 
@@ -77,7 +100,7 @@ instructions tell them so. Exact identifiers work best in `keyword` mode.
 ## Checked
 
 - The test suite starts `silo mcp` as a subprocess and drives it with the official MCP client:
-  tool listing, search, context, paged reading, status and error handling.
+  tool listing, sources, search, context, paged reading, status and error handling.
 - Claude Code, run headless with only the SILO tools allowed, answered a question about a
   control identifier in the sample corpus with the correct file and page, using one
   `search_documents` call in keyword mode.
