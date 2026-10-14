@@ -89,7 +89,7 @@ def build_server(settings: Settings) -> FastMCP:
     @server.tool(annotations=READ_ONLY)
     def find_sources(
         query: Annotated[str, Field(description="A question in plain language, or exact terms.")],
-        limit: Annotated[int, Field(ge=1, le=25, description="How many files.")] = 8,
+        limit: Annotated[int, Field(ge=1, le=50, description="How many files.")] = 8,
         mode: Annotated[str, Field(description=MODE_HELP)] = "hybrid",
     ) -> dict:
         """Find the files relevant to a question. Each source is one file, with its
@@ -104,7 +104,8 @@ def build_server(settings: Settings) -> FastMCP:
             "sources": [
                 {
                     "path": s.path, "file": s.rel_path, "title": s.title,
-                    "document_id": s.doc_id, "score": round(s.score, 4), "matches": s.matches,
+                    "document_id": s.doc_id, "score": round(s.score, 4),
+                    "reranked": s.rerank is not None, "matches": s.matches,
                     "state": s.source_state,
                     **({"also_at": s.also_at} if s.also_at else {}),
                     "sections": [

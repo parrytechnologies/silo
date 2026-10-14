@@ -146,3 +146,30 @@ mark { background: #bfe6f6; color: inherit; padding: 0 1px; }
 .store-line { margin: -8px 0 26px; color: var(--muted); font-size: 13.5px; overflow-wrap: anywhere; }
 .store-line code { font: 12.5px var(--mono); background: #dbe8ee; padding: 2px 6px; color: var(--ink); }
 .docs td strong { font-weight: 600; }
+/* Results are files; each lists its matching passages. */
+.source { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 4px 12px; padding: 20px 14px 16px 0; border-bottom: 1px solid var(--rule); }
+.source.is-active { background: #f8fbfc; box-shadow: inset 3px 0 0 var(--signal); }
+.source .hit-meta { margin-bottom: 6px; }
+.count { color: #2c607e; font-weight: 600; }
+.badge { border: 1px solid #9cbccb; color: #2c607e; font: 700 10px var(--head); letter-spacing: .1em; padding: 3px 7px; text-transform: uppercase; }
+.badge.warn { border-color: #b98a2e; color: #7a5a12; background: #fbf1d9; } .badge.off { border-color: #b3261e; color: #b3261e; }
+.passages { list-style: none; margin: 0; padding: 0; }
+.passage { border-top: 1px solid #d6e3ea; }
+.passage.is-extra { display: none; } .source.is-open .passage.is-extra { display: block; } .source.is-open > div > .more { display: none; }
+.passage > button { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; padding: 9px 10px; }
+.passage > button:hover, .passage.is-active > button { background: #e6f1f6; }
+.passage > button:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
+.where { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 4px; }
+.passage-text { color: #2f4a5b; font-size: 13.5px; line-height: 1.55; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.passage.is-active .passage-text { -webkit-line-clamp: 6; }
+.passage .gauge { display: none; margin: 0 10px 10px; } .passage.is-active .gauge { display: flex; }
+.more { all: unset; cursor: pointer; font: 700 12px var(--head); color: #075e90; padding: 8px 10px; }
+.more:hover { color: var(--ink); } .more:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.reader { flex: 1; min-width: 0; overflow: auto; padding: 22px 26px 30px; }
+.reader .more { display: block; color: var(--ice); padding: 4px 0 12px; } .reader .more:hover { color: #fff; }
+.reader-note { margin: 0 0 16px; padding: 10px 12px; border: 1px solid #b98a2e; color: #f3d38f; font-size: 13px; }
+.reader-head { font: 600 12px var(--head); letter-spacing: .04em; color: var(--ice); margin: 18px 0 6px; }
+.reader-passage { margin: 0 0 12px; padding: 4px 0 4px 12px; border-left: 2px solid transparent; color: #c5d6e0; font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.reader-passage.is-active { border-left-color: var(--sky); color: var(--paper); }
+.reader mark { background: rgba(112,200,237,.32); color: inherit; }
+@media (max-width: 640px) { .source { grid-template-columns: 30px minmax(0, 1fr); padding-right: 0; } }

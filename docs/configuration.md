@@ -43,7 +43,9 @@ win when it is opened. To change them, build a new store (or `silo reset` and re
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/status` | Index statistics, models, LLM egress, indexing job state |
-| GET | `/api/search?q=&mode=&k=&rerank=` | Search; returns hits with ranks, scores and timings |
+| GET | `/api/sources?q=&mode=&k=&rerank=` | Search by file (up to 50); each source has its path, state, identical copies and matching passages in reading order |
+| GET | `/api/search?q=&mode=&k=&rerank=` | Search by passage; returns hits with ranks, scores and timings |
+| GET | `/api/documents/{doc_id}/passages?start=&count=` | A document's indexed passages in order |
 | GET | `/api/documents` | Catalogue listing |
 | GET | `/api/documents/{id}/file` | The original file (only catalogued files are served) |
 | POST | `/api/ask` `{question, mode}` | Server-sent events: `sources`, `token`…, `done` |

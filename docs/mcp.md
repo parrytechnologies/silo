@@ -55,7 +55,7 @@ All six are marked read-only.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `find_sources` | `query`, `limit` (1–25 files, default 8), `mode` | Ranked files, one entry each: absolute `path`, `state`, `also_at`, matched `sections` (heading, page, `passage_id`), `matches`, score and a short snippet |
+| `find_sources` | `query`, `limit` (1–50 files, default 8), `mode` | Ranked files, one entry each: absolute `path`, `state`, `also_at`, matched `sections` (heading, page, `passage_id`), `matches`, score and a short snippet |
 | `search_documents` | `query`, `limit` (1–25, default 8), `mode` (`hybrid`, `semantic`, `keyword`) | Ranked passages with `passage_id`, `document_id`, file, page, section, score, text |
 | `get_passage_context` | `passage_id`, `before` (default 2), `after` (default 2) | The passage and its neighbours in reading order |
 | `read_document` | `document_id`, `start`, `count` (max 20) | Passages in order, with `next_start` for paging |
@@ -78,7 +78,10 @@ are relevant and where in them to look, and the client reads the file on disk.
 - `also_at` lists other paths holding a byte-identical copy of the file. Identical copies are
   returned once, by `find_sources` and by `search_documents`.
 - A file ranks by its best matching passage. `matches` counts how many retrieved passages came
-  from it and only breaks ties.
+  from it and only breaks ties. Long lists are reranked at the top only: sources with
+  `reranked: false` were ordered by rank fusion and follow the reranked ones.
+- The web interface lists the same sources, 50 at a time, with each file's matching passages
+  underneath. The default here is 8 because every source costs the client context.
 - Sections are headings and page numbers, not line numbers.
 
 Use `search_documents`, `get_passage_context` and `read_document` when the client cannot read

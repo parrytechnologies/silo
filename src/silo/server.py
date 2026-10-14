@@ -105,6 +105,13 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(400, f"mode must be one of {', '.join(MODES)}")
         return searcher.search(q, k=k, mode=mode, rerank=rerank).to_dict()
 
+    @app.get("/api/sources")
+    def sources(q: str = Query("", max_length=2000), mode: str = "hybrid",
+                k: int = Query(50, ge=1, le=50), rerank: bool | None = None) -> dict:
+        if mode not in MODES:
+            raise HTTPException(400, f"mode must be one of {', '.join(MODES)}")
+        return searcher.sources(q, k=k, mode=mode, rerank=rerank).to_dict()
+
     @app.get("/api/documents")
     def documents() -> dict:
         keys = ("doc_id", "rel_path", "title", "suffix", "size", "pages", "chunks", "status",
@@ -128,6 +135,20 @@ def create_app(settings: Settings) -> FastAPI:
         media = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         return FileResponse(path, media_type=media, content_disposition_type="inline",
                             filename=path.name)
+
+    @app.get("/api/documents/{doc_id}/passages")
+    def document_passages(doc_id: str, start: int = Query(0, ge=0),
+                          count: int = Query(10, ge=1, le=50)) -> dict:
+        row = store.document(doc_id)
+        if row is None:
+            raise HTTPException(404, "Unknown document.")
+        keys = ("id", "headings", "page_start", "page_end", "text")
+        return {
+            "doc_id": doc_id, "rel_path": row["rel_path"], "title": row["title"],
+            "total": row["chunks"],
+            "passages": [{**{k: p[k] for k in keys}, "position": p["chunk_index"]}
+                         for p in store.passages(doc_id, start, start + count - 1)],
+        }
 
     @app.post("/api/ask")
     def ask(request: AskRequest):

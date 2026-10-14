@@ -96,6 +96,19 @@ def test_http_api(engine):
     assert file.status_code == 200 and file.content.startswith(b"%PDF")
     assert client.get("/api/documents/..%2F..%2Fetc%2Fpasswd/file").status_code == 404
     assert client.get("/api/search", params={"q": "x", "mode": "nope"}).status_code == 400
+
+    listed = client.get("/api/sources", params={"q": "carry forward unused days"}).json()
+    first = listed["sources"][0]
+    assert first["rel_path"] == "leave-policy.pdf" and first["source_state"] == "current"
+    assert len({s["doc_id"] for s in listed["sources"]}) == len(listed["sources"])
+    assert any(p["page_start"] == 2 for p in first["passages"])
+    order = [int(p["chunk_id"].rsplit(":", 1)[1]) for p in first["passages"]]
+    assert order == sorted(order)  # reading order
+    assert client.get("/api/sources", params={"q": "x", "k": 51}).status_code == 422
+    reading = client.get(f"/api/documents/{first['doc_id']}/passages", params={"count": 1}).json()
+    assert reading["total"] >= 1 and reading["passages"][0]["position"] == 0
+    assert reading["passages"][0]["text"]
+    assert client.get("/api/documents/nope/passages").status_code == 404
     assert client.post("/api/ask", json={"question": "anything"}).status_code == 409
 
 

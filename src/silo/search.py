@@ -78,11 +78,13 @@ class Source:
     rel_path: str
     suffix: str
     score: float  # the best matching passage's score
+    rerank: float | None  # None when the best passage was ranked by fusion alone
     matches: int  # how many retrieved passages came from this file
     source_state: str
     also_at: list[str]
     sections: list[Section]  # where in the file the matches are, in reading order
     snippet: str  # start of the best matching passage, as indexed
+    passages: list[Hit]  # every matching passage, in reading order
 
 
 @dataclass
@@ -141,12 +143,17 @@ def group_sources(result: SearchResult, k: int = 8) -> SourceResult:
     """Collapse ranked passages into the files they came from, best file first.
 
     A file ranks by its best passage; the number of matching passages only breaks ties,
-    so a long document cannot outrank a better match by volume.
+    so a long document cannot outrank a better match by volume. Files whose best passage
+    was reranked come before files that only fusion ranked: the two scores are on
+    different scales and the reranked ones are the better evidence.
     """
     groups: dict[str, list[Hit]] = {}
     for hit in result.hits:  # best first, so each group's first hit is its best
         groups.setdefault(hit.doc_id, []).append(hit)
-    ranked = sorted(groups.values(), key=lambda hits: (-hits[0].score, -len(hits)))[:k]
+    ranked = sorted(
+        groups.values(),
+        key=lambda hits: (result.reranked and hits[0].rerank is None, -hits[0].score, -len(hits)),
+    )[:k]
     sources = []
     for rank, hits in enumerate(ranked, start=1):
         best = hits[0]
@@ -163,9 +170,10 @@ def group_sources(result: SearchResult, k: int = 8) -> SourceResult:
             Source(
                 rank=rank, doc_id=best.doc_id, title=best.title, path=best.path,
                 rel_path=best.rel_path, suffix=best.suffix, score=best.score,
-                matches=len(hits), source_state=best.source_state, also_at=best.also_at,
-                sections=listed,
+                rerank=best.rerank, matches=len(hits), source_state=best.source_state,
+                also_at=best.also_at, sections=listed,
                 snippet=snippet[:SNIPPET_CHARS] + ("…" if len(snippet) > SNIPPET_CHARS else ""),
+                passages=sorted(hits, key=lambda h: _position(h.chunk_id)),
             )
         )
     return SourceResult(result.query, result.mode, result.reranked, sources, result.timings_ms)
@@ -208,7 +216,9 @@ class Searcher:
             self.reranker.score("warm up", ["warm up"])
 
     def search(self, query: str, k: int = 10, mode: str = "hybrid",
-               rerank: bool | None = None) -> SearchResult:
+               rerank: bool | None = None, rerank_depth: int | None = None) -> SearchResult:
+        """The ``k`` best passages. ``rerank_depth`` caps how many fused candidates the
+        cross-encoder scores; any results beyond it follow in fusion order."""
         query = " ".join(query.split())
         if mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
@@ -253,11 +263,11 @@ class Searcher:
         reranked = False
         if rerank and ordered:
             t = time.perf_counter()
-            head = ordered[: max(s.rerank_top, k)]
+            head = ordered[: rerank_depth or max(s.rerank_top, k)]
             scores = self.reranker.score(query, [e["row"]["search_text"] for e in head])
             for entry, logit in zip(head, scores, strict=True):
                 entry["rerank"] = 1.0 / (1.0 + math.exp(-logit))
-            ordered = sorted(head, key=lambda e: e["rerank"], reverse=True)
+            ordered = sorted(head, key=lambda e: e["rerank"], reverse=True) + ordered[len(head):]
             timings["rerank"] = (time.perf_counter() - t) * 1000
             reranked = True
 
@@ -277,7 +287,7 @@ class Searcher:
                     suffix=doc["suffix"] if doc else "", text=row["text"],
                     headings=row["headings"], page_start=row["page_start"],
                     page_end=row["page_end"],
-                    score=entry["rerank"] if reranked else entry["rrf"],
+                    score=entry.get("rerank", entry["rrf"]),
                     vector_rank=entry.get("vector_rank"), keyword_rank=entry.get("keyword_rank"),
                     vector_similarity=entry.get("vector_similarity"), bm25=entry.get("bm25"),
                     rrf=entry["rrf"], rerank=entry.get("rerank"),
@@ -296,5 +306,9 @@ class Searcher:
                 rerank: bool | None = None) -> SourceResult:
         """The ``k`` most relevant files, each with the sections that matched."""
         s = self.settings
-        pool = max(s.rerank_top, min(4 * k, s.candidates))  # passages to group
-        return group_sources(self.search(query, k=pool, mode=mode, rerank=rerank), k)
+        # Group four passages per file asked for, but keep the cross-encoder's work
+        # bounded: a long list is reranked at the top and fusion-ordered below it.
+        pool = max(s.rerank_top, 4 * k)
+        depth = max(s.rerank_top, min(pool, s.candidates))
+        result = self.search(query, k=pool, mode=mode, rerank=rerank, rerank_depth=depth)
+        return group_sources(result, k)

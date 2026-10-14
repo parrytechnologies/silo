@@ -149,6 +149,18 @@ def test_sources_group_passages_by_file():
     assert grouped.to_dict()["sources"][1]["sections"][0]["page_start"] == 1
 
 
+def test_reranked_files_rank_above_fusion_only_files():
+    def hit(rank, doc, score, rerank):
+        return Hit(rank, f"{doc}:0", doc, "", f"{doc}.md", ".md", "t", "", 0, 0, score,
+                   rerank=rerank)
+
+    # A long list is reranked at the top only; fusion scores are on another scale.
+    hits = [hit(1, "a", 0.4, 0.4), hit(2, "b", 0.01, 0.01), hit(3, "c", 0.03, None)]
+    result = SearchResult("q", "hybrid", True, hits, {})
+    assert [s.doc_id for s in group_sources(result, k=3).sources] == ["a", "b", "c"]
+    assert [s.rerank for s in group_sources(result, k=3).sources] == [0.4, 0.01, None]
+
+
 def test_source_state_tracks_the_file_on_disk(tmp_path):
     note = tmp_path / "note.md"
     note.write_text("first")
